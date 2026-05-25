@@ -1,7 +1,15 @@
 export default async function handler(req, res) {
-  // only allow POST
+  // allow CORS (this is required for penguinmod/browser tools)
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   if (req.method !== "POST") {
-    return res.status(405).send("method not allowed");
+    return res.status(405).send("method not allowed (use POST)");
   }
 
   try {
@@ -16,8 +24,14 @@ export default async function handler(req, res) {
       return res.status(400).send("missing message");
     }
 
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return res.status(500).send("missing GEMINI_API_KEY on vercel");
+    }
+
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: {
@@ -36,24 +50,21 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    const output =
+    const text =
       data?.candidates?.[0]?.content?.parts
         ?.map(p => p.text || "")
         .join("") || "";
 
-    if (!output) {
-      return res
-        .status(500)
-        .send("no ai response (empty output from gemini)");
+    if (!text) {
+      return res.status(500).send(
+        "empty gemini response (check api key or request format)"
+      );
     }
 
     res.setHeader("Content-Type", "text/plain");
-    return res.status(200).send(output);
+    return res.status(200).send(text);
 
   } catch (err) {
-    // THIS is the important part
-    return res
-      .status(500)
-      .send("server error: " + (err?.message || String(err)));
+    return res.status(500).send("server error: " + err.message);
   }
 }
