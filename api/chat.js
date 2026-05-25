@@ -1,14 +1,16 @@
 export default async function handler(req, res) {
-  // allow only POST
+  // only allow POST
   if (req.method !== "POST") {
     return res.status(405).send("method not allowed");
   }
 
   try {
-    // debug incoming body
-    console.log("BODY:", req.body);
+    const body =
+      typeof req.body === "string"
+        ? JSON.parse(req.body)
+        : req.body;
 
-    const message = req.body?.message;
+    const message = body?.message;
 
     if (!message) {
       return res.status(400).send("missing message");
@@ -24,11 +26,8 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           contents: [
             {
-              parts: [
-                {
-                  text: message
-                }
-              ]
+              role: "user",
+              parts: [{ text: message }]
             }
           ]
         })
@@ -37,18 +36,24 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    console.log("GEMINI RESPONSE:", JSON.stringify(data));
-
     const output =
       data?.candidates?.[0]?.content?.parts
-        ?.map(part => part.text || "")
+        ?.map(p => p.text || "")
         .join("") || "";
 
-    res.setHeader("Content-Type", "text/plain");
-    return res.status(200).send(output || "empty ai response");
+    if (!output) {
+      return res
+        .status(500)
+        .send("no ai response (empty output from gemini)");
+    }
 
-  } catch (error) {
-    console.error(error);
-    return res.status(500).send("server error");
+    res.setHeader("Content-Type", "text/plain");
+    return res.status(200).send(output);
+
+  } catch (err) {
+    // THIS is the important part
+    return res
+      .status(500)
+      .send("server error: " + (err?.message || String(err)));
   }
 }
