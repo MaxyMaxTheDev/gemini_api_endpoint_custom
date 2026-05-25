@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== "POST") {
-    return res.status(405).send("method not allowed");
+    return res.status(405).send("This URL is for POST APIs only.");
   }
 
   try {
