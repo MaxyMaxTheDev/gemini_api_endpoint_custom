@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // CORS (required for browser + penguinmod)
+  // CORS (required for TurboWarp / Penguinmod)
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -19,12 +19,11 @@ export default async function handler(req, res) {
       return res.status(500).send("missing GROQ_API_KEY");
     }
 
-    // =========================
-    // STEP 1: normalize input
-    // =========================
+    // ----------------------------
+    // 1. normalize input from penguinmod
+    // ----------------------------
     let body = req.body;
 
-    // handle stringified JSON
     if (typeof body === "string") {
       try {
         body = JSON.parse(body);
@@ -33,59 +32,50 @@ export default async function handler(req, res) {
       }
     }
 
-    // handle completely empty body
-    if (!body) {
-      return res.status(400).send("empty request body");
+    // ----------------------------
+    // 2. extract user message safely
+    // ----------------------------
+    let userMessage =
+      body?.message ||
+      body?.text ||
+      body?.input ||
+      (typeof body === "string" ? body : "");
+
+    userMessage = String(userMessage).trim();
+
+    // remove accidental quotes
+    if (
+      userMessage.startsWith('"') &&
+      userMessage.endsWith('"')
+    ) {
+      userMessage = userMessage.slice(1, -1);
     }
 
-    // =========================
-    // STEP 2: extract message safely
-    // =========================
-    let messages = null;
-
-    // already correct format
-    if (Array.isArray(body.messages)) {
-      messages = body.messages;
+    if (!userMessage) {
+      return res.status(400).send("no message received");
     }
 
-    // single message format
-    else if (body.message) {
-      messages = [
+    // ----------------------------
+    // 3. build groq request
+    // ----------------------------
+    const groqBody = {
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "system",
+          content:
+            "you are a chaotic gen z ai. keep responses short, funny, casual, slightly unhelpful but useful when needed."
+        },
         {
           role: "user",
-          content: String(body.message)
+          content: userMessage
         }
-      ];
-    }
+      ]
+    };
 
-    // fallback text field
-    else if (body.text) {
-      messages = [
-        {
-          role: "user",
-          content: String(body.text)
-        }
-      ];
-    }
-
-    // last fallback: raw object string
-    else {
-      messages = [
-        {
-          role: "user",
-          content: JSON.stringify(body)
-        }
-      ];
-    }
-
-    // safety check
-    if (!messages) {
-      return res.status(400).send("could not parse messages");
-    }
-
-    // =========================
-    // STEP 3: call groq
-    // =========================
+    // ----------------------------
+    // 4. call groq
+    // ----------------------------
     const response = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
       {
@@ -94,30 +84,31 @@ export default async function handler(req, res) {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${apiKey}`
         },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages
-        })
+        body: JSON.stringify(groqBody)
       }
     );
 
     const data = await response.json();
 
-    // groq error handling
     if (data.error) {
-      return res.status(500).send("groq error: " + data.error.message);
+      return res
+        .status(500)
+        .send("groq error: " + data.error.message);
     }
 
-    // =========================
-    // STEP 4: extract output
-    // =========================
-    const text = data?.choices?.[0]?.message?.content;
+    // ----------------------------
+    // 5. extract response text
+    // ----------------------------
+    const text =
+      data?.choices?.[0]?.message?.content;
 
     if (!text) {
-      return res.status(500).send("empty response from groq");
+      return res.status(500).send("empty ai response");
     }
 
-    // return clean text for penguinmod
+    // ----------------------------
+    // 6. return clean output
+    // ----------------------------
     res.setHeader("Content-Type", "text/plain");
     return res.status(200).send(text);
 
