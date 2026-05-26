@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // CORS (required for TurboWarp / Penguinmod)
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -19,63 +18,33 @@ export default async function handler(req, res) {
       return res.status(500).send("missing GROQ_API_KEY");
     }
 
-    // ----------------------------
-    // 1. normalize input from penguinmod
-    // ----------------------------
-    let body = req.body;
+    // 🔥 THIS is the fix: treat EVERYTHING as raw input first
+    let userMessage = "";
+
+    // Vercel sometimes gives:
+    // - string
+    // - object
+    // - undefined
+    const body = req.body;
 
     if (typeof body === "string") {
-      try {
-        body = JSON.parse(body);
-      } catch {
-        body = { message: body };
-      }
+      userMessage = body;
+    } else if (body && typeof body === "object") {
+      userMessage =
+        body.message ||
+        body.text ||
+        body.input ||
+        JSON.stringify(body);
     }
-
-    // ----------------------------
-    // 2. extract user message safely
-    // ----------------------------
-    let userMessage =
-      body?.message ||
-      body?.text ||
-      body?.input ||
-      (typeof body === "string" ? body : "");
 
     userMessage = String(userMessage).trim();
 
-    // remove accidental quotes
-    if (
-      userMessage.startsWith('"') &&
-      userMessage.endsWith('"')
-    ) {
-      userMessage = userMessage.slice(1, -1);
-    }
-
     if (!userMessage) {
-      return res.status(400).send("no message received");
+      return res
+        .status(400)
+        .send("no message received from penguinmod/turbowarp");
     }
 
-    // ----------------------------
-    // 3. build groq request
-    // ----------------------------
-    const groqBody = {
-      model: "llama-3.3-70b-versatile",
-      messages: [
-        {
-          role: "system",
-          content:
-            "you are a chaotic gen z ai. keep responses short, funny, casual, slightly unhelpful but useful when needed."
-        },
-        {
-          role: "user",
-          content: userMessage
-        }
-      ]
-    };
-
-    // ----------------------------
-    // 4. call groq
-    // ----------------------------
     const response = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
       {
@@ -84,7 +53,20 @@ export default async function handler(req, res) {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${apiKey}`
         },
-        body: JSON.stringify(groqBody)
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [
+            {
+              role: "system",
+              content:
+                "you are a chaotic gen z ai. short, funny, casual responses."
+            },
+            {
+              role: "user",
+              content: userMessage
+            }
+          ]
+        })
       }
     );
 
@@ -96,19 +78,12 @@ export default async function handler(req, res) {
         .send("groq error: " + data.error.message);
     }
 
-    // ----------------------------
-    // 5. extract response text
-    // ----------------------------
-    const text =
-      data?.choices?.[0]?.message?.content;
+    const text = data?.choices?.[0]?.message?.content;
 
     if (!text) {
-      return res.status(500).send("empty ai response");
+      return res.status(500).send("empty response from groq");
     }
 
-    // ----------------------------
-    // 6. return clean output
-    // ----------------------------
     res.setHeader("Content-Type", "text/plain");
     return res.status(200).send(text);
 
