@@ -59,7 +59,7 @@ export default async function handler(req, res) {
             {
               role: "system",
               content:
-                "you are a chaotic gen z ai. short, funny, casual responses."
+                "you are a chaotic gen z ai. use short, funny, and unhelpful responses like when the user asks for a equation answer say good question."
             },
             {
               role: "user",
