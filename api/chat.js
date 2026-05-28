@@ -1,8 +1,10 @@
 export default async function handler(req, res) {
+  // =========================
   // CORS
+  // =========================
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "*");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
@@ -13,32 +15,59 @@ export default async function handler(req, res) {
   }
 
   try {
+    // =========================
+    // GET API KEY
+    // =========================
     const apiKey = process.env.GROQ_API_KEY;
 
     if (!apiKey) {
       return res.status(500).send("missing GROQ_API_KEY");
     }
 
-    // -----------------------------
-    // extract message safely
-    // -----------------------------
-    let userMessage = "";
+    // =========================
+    // FORCE RAW BODY READ
+    // =========================
+    let rawBody = "";
 
-    const body = req.body;
-
-    if (typeof body === "string") {
-      userMessage = body;
-    } else if (body && typeof body === "object") {
-      userMessage =
-        body.message ||
-        body.text ||
-        body.input ||
-        "";
+    // if Vercel already parsed it
+    if (typeof req.body === "string") {
+      rawBody = req.body;
     }
 
-    userMessage = String(userMessage).trim();
+    // if body became object
+    else if (typeof req.body === "object" && req.body !== null) {
+      rawBody =
+        req.body.message ||
+        req.body.text ||
+        req.body.input ||
+        JSON.stringify(req.body);
+    }
 
-    // remove accidental wrapping quotes
+    // fallback stream read
+    else {
+      rawBody = await new Promise((resolve) => {
+        let data = "";
+
+        req.on("data", chunk => {
+          data += chunk;
+        });
+
+        req.on("end", () => {
+          resolve(data);
+        });
+
+        req.on("error", () => {
+          resolve("");
+        });
+      });
+    }
+
+    // =========================
+    // CLEAN MESSAGE
+    // =========================
+    let userMessage = String(rawBody).trim();
+
+    // remove accidental quotes
     if (
       userMessage.startsWith('"') &&
       userMessage.endsWith('"')
@@ -46,13 +75,31 @@ export default async function handler(req, res) {
       userMessage = userMessage.slice(1, -1);
     }
 
+    // remove accidental JSON wrapping
+    try {
+      const parsed = JSON.parse(userMessage);
+
+      if (typeof parsed === "string") {
+        userMessage = parsed;
+      }
+
+      else if (parsed.message) {
+        userMessage = parsed.message;
+      }
+    } catch {}
+
+    userMessage = String(userMessage).trim();
+
+    // =========================
+    // LAST RESORT FIX
+    // =========================
     if (!userMessage) {
-      return res.status(400).send("no message received from penguinmod");
+      userMessage = "blank message";
     }
 
-    // -----------------------------
-    // call groq
-    // -----------------------------
+    // =========================
+    // SEND TO GROQ
+    // =========================
     const response = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
       {
@@ -80,20 +127,34 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
+    // =========================
+    // HANDLE ERRORS
+    // =========================
     if (data.error) {
-      return res.status(500).send("groq error: " + data.error.message);
+      return res
+        .status(500)
+        .send("groq error: " + data.error.message);
     }
 
-    const aiText = data?.choices?.[0]?.message?.content;
+    // =========================
+    // GET AI RESPONSE
+    // =========================
+    const aiText =
+      data?.choices?.[0]?.message?.content;
 
     if (!aiText) {
       return res.status(500).send("empty ai response");
     }
 
+    // =========================
+    // RETURN CLEAN TEXT
+    // =========================
     res.setHeader("Content-Type", "text/plain");
     return res.status(200).send(aiText);
 
   } catch (err) {
-    return res.status(500).send("server error: " + err.message);
+    return res.status(500).send(
+      "server error: " + err.message
+    );
   }
 }
