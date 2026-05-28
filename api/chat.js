@@ -16,7 +16,7 @@ export default async function handler(req, res) {
 
   try {
     // =========================
-    // GET API KEY
+    // API KEY
     // =========================
     const apiKey = process.env.GROQ_API_KEY;
 
@@ -25,47 +25,24 @@ export default async function handler(req, res) {
     }
 
     // =========================
-    // FORCE RAW BODY READ
+    // GET RAW MESSAGE
     // =========================
-    let rawBody = "";
+    let userMessage = "";
 
-    // if Vercel already parsed it
+    // raw string body
     if (typeof req.body === "string") {
-      rawBody = req.body;
+      userMessage = req.body;
     }
 
-    // if body became object
-    else if (typeof req.body === "object" && req.body !== null) {
-      rawBody =
-        req.body.message ||
-        req.body.text ||
-        req.body.input ||
-        JSON.stringify(req.body);
+    // weird object fallback
+    else if (
+      typeof req.body === "object" &&
+      req.body !== null
+    ) {
+      userMessage = JSON.stringify(req.body);
     }
 
-    // fallback stream read
-    else {
-      rawBody = await new Promise((resolve) => {
-        let data = "";
-
-        req.on("data", chunk => {
-          data += chunk;
-        });
-
-        req.on("end", () => {
-          resolve(data);
-        });
-
-        req.on("error", () => {
-          resolve("");
-        });
-      });
-    }
-
-    // =========================
-    // CLEAN MESSAGE
-    // =========================
-    let userMessage = String(rawBody).trim();
+    userMessage = String(userMessage).trim();
 
     // remove accidental quotes
     if (
@@ -75,27 +52,27 @@ export default async function handler(req, res) {
       userMessage = userMessage.slice(1, -1);
     }
 
-    // remove accidental JSON wrapping
-    try {
-      const parsed = JSON.parse(userMessage);
-
-      if (typeof parsed === "string") {
-        userMessage = parsed;
-      }
-
-      else if (parsed.message) {
-        userMessage = parsed.message;
-      }
-    } catch {}
-
-    userMessage = String(userMessage).trim();
-
-    // =========================
-    // LAST RESORT FIX
-    // =========================
     if (!userMessage) {
       userMessage = "blank message";
     }
+
+    // =========================
+    // BUILD GROQ REQUEST
+    // =========================
+    const groqBody = {
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "system",
+          content:
+            "you are a chaotic gen z ai. use short, funny, and unhelpful responses. when the user asks for a math equation, respond with 'good question'. be 50% dumb and 50% smart."
+        },
+        {
+          role: "user",
+          content: userMessage
+        }
+      ]
+    };
 
     // =========================
     // SEND TO GROQ
@@ -108,20 +85,7 @@ export default async function handler(req, res) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`
         },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: [
-            {
-              role: "system",
-              content:
-                "you are a chaotic gen z ai. use short, funny, and unhelpful responses. when the user asks for a math equation, respond with 'good question'. be 50% dumb and 50% smart."
-            },
-            {
-              role: "user",
-              content: userMessage
-            }
-          ]
-        })
+        body: JSON.stringify(groqBody)
       }
     );
 
